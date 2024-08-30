@@ -1,4 +1,8 @@
 {
+  "https": true,
+  "https_port": 3040,
+  "openssl_key": "key.pem",
+  "openssl_cert": "cert.pem",
   "ip": "127.0.0.1",
   "port": 3030,
   "serve_dir": "public",

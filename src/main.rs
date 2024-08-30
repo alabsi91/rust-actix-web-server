@@ -3,6 +3,7 @@ use actix_web::dev::ServiceResponse;
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Result};
 use askama_escape::{escape as escape_html_entity, Html};
 use once_cell::sync::Lazy;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use serde::Deserialize;
 use std::fs::File;
@@ -12,6 +13,10 @@ use std::{fmt::Write, path::Path};
 
 #[derive(Debug, Deserialize, Clone)]
 struct Config {
+    https: bool,
+    https_port: u16,
+    openssl_key: String,
+    openssl_cert: String,
     ip: String,
     port: u16,
     not_found_file: String,
@@ -67,9 +72,7 @@ async fn file_handler((_req, path): (HttpRequest, web::Path<String>)) -> Result<
 async fn main() -> std::io::Result<()> {
     let ip_address = CONFIG.ip.clone();
 
-    println!("Starting server on http://{}:{}", ip_address, CONFIG.port);
-
-    HttpServer::new(|| {
+    let server = || {
         App::new()
             .service(index_without_slash)
             .service(
@@ -78,10 +81,38 @@ async fn main() -> std::io::Result<()> {
                     .files_listing_renderer(directory_listing),
             )
             .service(web::resource("/{path:.*}").route(web::get().to(file_handler)))
-    })
-    .bind((ip_address, CONFIG.port))?
-    .run()
-    .await
+    };
+
+    let http_server = HttpServer::new(server).bind((ip_address.clone(), CONFIG.port))?;
+
+    if CONFIG.https {
+        println!(
+            "Starting server on https://{}:{} and http://{}:{}",
+            ip_address.clone(),
+            CONFIG.https_port,
+            ip_address.clone(),
+            CONFIG.port
+        );
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        builder
+            .set_private_key_file(CONFIG.openssl_key.clone(), SslFiletype::PEM)
+            .unwrap();
+        builder
+            .set_certificate_chain_file(CONFIG.openssl_cert.clone())
+            .unwrap();
+
+        let https_server = HttpServer::new(server)
+            .bind_openssl((ip_address.clone(), CONFIG.https_port), builder)?;
+
+        tokio::try_join!(https_server.run(), http_server.run())?;
+
+        Ok(())
+    } else {
+        println!("Starting server on http://{}:{}", ip_address, CONFIG.port);
+        tokio::try_join!(http_server.run())?;
+
+        Ok(())
+    }
 }
 
 // Returns percent encoded file URL path.
