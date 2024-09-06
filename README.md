@@ -13,6 +13,11 @@
   "serve_dir": "public",
   "file_listing_dir": "public/files",
   "file_listing_entry": "static",
-  "not_found_file": "public/404.html"
+  "not_found_file": "public/404.html",
+  "blacklist": [],
+  "rate_limit": {
+    "per_second": 2,
+    "burst_size": 5
+  }
 }
 ```

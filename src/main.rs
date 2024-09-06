@@ -1,4 +1,5 @@
 use actix_files::{Directory, NamedFile};
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::dev::ServiceResponse;
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Result};
 use askama_escape::{escape as escape_html_entity, Html};
@@ -23,6 +24,14 @@ struct Config {
     serve_dir: String,
     file_listing_dir: String,
     file_listing_entry: String,
+    blacklist: Vec<String>,
+    rate_limit: RateLimit,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct RateLimit {
+    per_second: u64,
+    burst_size: u32,
 }
 
 fn read_config_file(filename: &str) -> Config {
@@ -50,6 +59,12 @@ async fn file_handler((req, path): (HttpRequest, web::Path<String>)) -> Result<N
     let connection_info = req.connection_info();
     let client_ip = connection_info.realip_remote_addr().unwrap_or("unknown ip");
 
+    // check if file is in blacklist
+    if CONFIG.blacklist.contains(&client_ip.to_owned()) {
+        println!("[{}] Blacklisted: {}", client_ip, file_path.display());
+        return Err(io::Error::new(io::ErrorKind::Other, "Blacklisted").into());
+    }
+
     // serve assets
     if file_path.exists() && file_path.is_file() {
         println!("[{}] Serving: {}", client_ip, file_path.display());
@@ -76,8 +91,15 @@ async fn file_handler((req, path): (HttpRequest, web::Path<String>)) -> Result<N
 async fn main() -> std::io::Result<()> {
     let ip_address = CONFIG.ip.clone();
 
-    let server = || {
+    let governor_conf = GovernorConfigBuilder::default()
+        .per_second(CONFIG.rate_limit.per_second)
+        .burst_size(CONFIG.rate_limit.burst_size)
+        .finish()
+        .unwrap();
+
+    let server = move || {
         App::new()
+            .wrap(Governor::new(&governor_conf))
             .service(index_without_slash)
             .service(
                 actix_files::Files::new(&CONFIG.file_listing_entry, &CONFIG.file_listing_dir)
@@ -86,6 +108,8 @@ async fn main() -> std::io::Result<()> {
             )
             .service(web::resource("/{path:.*}").route(web::get().to(file_handler)))
     };
+
+    let server_clone = server.clone();
 
     let http_server = HttpServer::new(server).bind((ip_address.clone(), CONFIG.port))?;
 
@@ -105,7 +129,7 @@ async fn main() -> std::io::Result<()> {
             .set_certificate_chain_file(CONFIG.openssl_cert.clone())
             .unwrap();
 
-        let https_server = HttpServer::new(server)
+        let https_server = HttpServer::new(server_clone)
             .bind_openssl((ip_address.clone(), CONFIG.https_port), builder)?;
 
         tokio::try_join!(https_server.run(), http_server.run())?;
@@ -139,6 +163,15 @@ fn directory_listing(dir: &Directory, req: &HttpRequest) -> Result<ServiceRespon
 
     let connection_info = req.connection_info();
     let client_ip = connection_info.realip_remote_addr().unwrap_or("unknown ip");
+
+    // check if file is in blacklist
+    if CONFIG.blacklist.contains(&client_ip.to_owned()) {
+        println!("[{}] Blacklisted: {}", client_ip, dir.path.display());
+        return Ok(ServiceResponse::new(
+            req.clone(),
+            HttpResponse::Forbidden().finish(),
+        ));
+    }
 
     println!("[{}] Serving: {}", client_ip, dir.path.display());
 
