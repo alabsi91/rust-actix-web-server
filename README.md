@@ -4,20 +4,37 @@
 
 ```json
 {
-  "https": true,
-  "https_port": 3040,
-  "openssl_key": "key.pem",
-  "openssl_cert": "cert.pem",
-  "ip": "127.0.0.1",
-  "port": 3030,
-  "serve_dir": "public",
-  "file_listing_dir": "public/files",
-  "file_listing_entry": "static",
-  "not_found_file": "public/404.html",
-  "blacklist": [],
-  "rate_limit": {
-    "per_second": 2,
-    "burst_size": 5
+  "https": {
+    "enabled": false,
+    "ip": "127.0.0.1",
+    "port": 3040,
+    "key": "key.pem",
+    "cert": "cert.pem"
+  },
+
+  "http": {
+    "enabled": true,
+    "ip": "127.0.0.1",
+    "port": 3030
+  },
+
+  "file_listing": {
+    "enabled": true,
+    "dir": "public/files",
+    "route": "static"
+  },
+
+  "public_dir": "public",
+  "not_found_page": "public/404.html",
+
+  "filtering": {
+    "ip_whitelist": ["*.*.*.*"],
+    "ip_blacklist": [],
+
+    "rate_limit": {
+      "per_second": 2,
+      "burst_size": 20
+    }
   }
 }
 ```
