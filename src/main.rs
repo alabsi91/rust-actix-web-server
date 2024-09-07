@@ -52,26 +52,23 @@ async fn main() -> std::io::Result<()> {
             .map(|s| s.as_str())
             .collect();
 
-        let app = App::new()
-            .wrap(Governor::new(&governor_conf))
-            .wrap(
-                IPFilter::new()
-                    .allow(whitelist)
-                    .block(blacklist)
-                    .on_block(on_block),
-            )
-            .service(index_without_slash)
-            .service(web::resource("/{path:.*}").route(web::get().to(file_handler)));
+        let mut app = App::new().wrap(Governor::new(&governor_conf)).wrap(
+            IPFilter::new()
+                .allow(whitelist)
+                .block(blacklist)
+                .on_block(on_block),
+        );
 
         if CONFIG.file_listing.enabled {
-            return app.service(
+            app = app.service(
                 actix_files::Files::new(&CONFIG.file_listing.route, &CONFIG.file_listing.dir)
                     .show_files_listing()
                     .files_listing_renderer(directory_listing),
             );
         }
 
-        return app;
+        app.service(index_without_slash)
+            .service(web::resource("/{path:.*}").route(web::get().to(file_handler)))
     };
 
     let mut servers: Vec<Server> = vec![];
