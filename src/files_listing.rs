@@ -2,6 +2,7 @@ use actix_files::Directory;
 use actix_web::dev::ServiceResponse;
 use actix_web::{HttpRequest, HttpResponse, Result};
 use askama_escape::{escape as escape_html_entity, Html};
+use colored::Colorize;
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::io;
 use std::{fmt::Write, path::Path};
@@ -26,7 +27,11 @@ pub fn directory_listing(dir: &Directory, req: &HttpRequest) -> Result<ServiceRe
     let connection_info = req.connection_info();
     let client_ip = connection_info.realip_remote_addr().unwrap_or("unknown ip");
 
-    println!("[{}] Serving: {}", client_ip, dir.path.display());
+    println!(
+        "[{}] Serving: {}",
+        client_ip.to_string().blue(),
+        dir.path.display().to_string().yellow()
+    );
 
     for entry in dir.path.read_dir()? {
         if !dir.is_visible(&entry) {

@@ -1,3 +1,4 @@
+use colored::Colorize;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::fs::File;
@@ -55,7 +56,16 @@ fn read_config_file(filename: &str) -> Config {
     let reader = BufReader::new(file);
 
     // Deserialize JSON into Config struct
-    serde_json::from_reader(reader).expect("Failed to parse config.json file")
+    let res = serde_json::from_reader(reader);
+
+    match res {
+        Ok(config) => config,
+        Err(err) => {
+            println!("{}", "Failed to parse config.json".red());
+            eprintln!("{}", err.to_string().red());
+            std::process::exit(1);
+        }
+    }
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| read_config_file("config.json"));

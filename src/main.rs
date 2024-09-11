@@ -9,8 +9,9 @@ use actix_web::{
     dev::{self, Server},
     get, web, App, HttpResponse, HttpServer,
 };
+use colored::Colorize;
 use futures_util::future::try_join_all;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslFiletype, SslMethod};
 
 use config::CONFIG;
 use files_listing::directory_listing;
@@ -25,17 +26,25 @@ async fn index_without_slash(path: web::Path<String>) -> HttpResponse {
 }
 
 fn on_block(_flt: &IPFilter, ip: &str, _req: &dev::ServiceRequest) -> Option<HttpResponse> {
-    println!("[{}] Blocked", ip);
+    println!("[{}] {}", ip.to_string().blue(), "Blocked".red());
     return Some(HttpResponse::Forbidden().body("Forbidden"));
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let governor_conf = GovernorConfigBuilder::default()
+    let governor_res = GovernorConfigBuilder::default()
         .per_second(CONFIG.filtering.rate_limit.per_second)
         .burst_size(CONFIG.filtering.rate_limit.burst_size)
-        .finish()
-        .unwrap();
+        .finish();
+
+    let governor_conf;
+    match governor_res {
+        Some(conf) => governor_conf = conf,
+        None => {
+            println!("{}", "Error: Failed to create governor configuration".red());
+            std::process::exit(1);
+        }
+    }
 
     let base_server = move || {
         let blacklist = CONFIG
@@ -75,40 +84,73 @@ async fn main() -> std::io::Result<()> {
 
     if CONFIG.https.enabled {
         println!(
-            "Starting HTTPS server on https://{}:{}",
-            CONFIG.https.ip.clone(),
-            CONFIG.https.port,
+            "Starting {} server on {}{}{}{}",
+            "HTTPS".yellow(),
+            "https://".green(),
+            CONFIG.https.ip.clone().green(),
+            ":".yellow(),
+            CONFIG.https.port.to_string().blue()
         );
 
-        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        builder
-            .set_private_key_file(CONFIG.https.key.clone(), SslFiletype::PEM)
-            .unwrap();
-        builder
-            .set_certificate_chain_file(CONFIG.https.cert.clone())
-            .unwrap();
+        let mut builder: SslAcceptorBuilder;
+        match SslAcceptor::mozilla_intermediate(SslMethod::tls()) {
+            Ok(b) => builder = b,
+            Err(e) => {
+                println!("{}", "Error: Failed to create SSL Acceptor".red());
+                eprintln!("{}", e.to_string().red());
+                std::process::exit(1);
+            }
+        }
+
+        if let Err(e) = builder.set_private_key_file(CONFIG.https.key.clone(), SslFiletype::PEM) {
+            println!("{}", "Error: Failed to set SSL private key".red());
+            eprintln!("{}", e.to_string().red());
+            std::process::exit(1);
+        }
+
+        if let Err(e) = builder.set_certificate_chain_file(CONFIG.https.cert.clone()) {
+            println!("{}", "Error: Failed to set SSL certificate".red());
+            eprintln!("{}", e.to_string().red());
+            std::process::exit(1);
+        }
 
         let https_server = HttpServer::new(base_server.clone())
-            .bind_openssl((CONFIG.https.ip.clone(), CONFIG.https.port), builder)
-            .unwrap()
-            .run();
+            .bind_openssl((CONFIG.https.ip.clone(), CONFIG.https.port), builder);
 
-        servers.push(https_server);
+        match https_server {
+            Ok(server) => servers.push(server.run()),
+            Err(e) => {
+                println!(
+                    "{}",
+                    "Error: Failed to bind the server to openSSL HTTPS".red()
+                );
+                eprintln!("{}", e.to_string().red());
+                std::process::exit(1);
+            }
+        }
     }
 
     if CONFIG.http.enabled {
         println!(
-            "Starting HTTP server on http://{}:{}",
-            CONFIG.http.ip.clone(),
-            CONFIG.http.port
+            "Starting {} server on {}{}{}{}",
+            "HTTP".yellow(),
+            "http://".green(),
+            CONFIG.http.ip.clone().green(),
+            ":".yellow(),
+            CONFIG.http.port.to_string().blue()
         );
 
-        let http_server = HttpServer::new(base_server)
-            .bind((CONFIG.http.ip.clone(), CONFIG.http.port))
-            .unwrap()
-            .run();
+        let http_server =
+            HttpServer::new(base_server).bind((CONFIG.http.ip.clone(), CONFIG.http.port));
 
-        servers.push(http_server);
+        match http_server {
+            Ok(server) => servers.push(server.run()),
+            Err(e) => {
+                println!("{}", "Error: Failed to bind the server to HTTP".red());
+                eprintln!("{}", e.to_string().red());
+                std::process::exit(1);
+            }
+        }
     }
 
     if servers.is_empty() {
@@ -116,7 +158,11 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    try_join_all(servers).await?;
+    if let Err(e) = try_join_all(servers).await {
+        println!("{}", "Error: Failed to start".red());
+        eprintln!("{}", e.to_string().red());
+        std::process::exit(1);
+    }
 
     Ok(())
 }
