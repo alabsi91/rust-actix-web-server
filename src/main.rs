@@ -25,8 +25,13 @@ async fn index_without_slash(path: web::Path<String>) -> HttpResponse {
         .finish()
 }
 
-fn on_block(_flt: &IPFilter, ip: &str, _req: &dev::ServiceRequest) -> Option<HttpResponse> {
-    println!("[{}] {}", ip.to_string().blue(), "Blocked".red());
+fn on_block(_flt: &IPFilter, ip: &str, req: &dev::ServiceRequest) -> Option<HttpResponse> {
+    println!(
+        "[{}] {} {}",
+        ip.to_string().blue(),
+        "Blocked:".red(),
+        req.path().to_string().yellow()
+    );
     return Some(HttpResponse::Forbidden().body("Forbidden"));
 }
 
@@ -65,7 +70,8 @@ async fn main() -> std::io::Result<()> {
             IPFilter::new()
                 .allow(whitelist)
                 .block(blacklist)
-                .on_block(on_block),
+                .on_block(on_block)
+                .x_real_ip(true),
         );
 
         if CONFIG.file_listing.enabled {
